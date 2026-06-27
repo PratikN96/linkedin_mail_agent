@@ -7,8 +7,6 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 const YOUR_NAME = Deno.env.get("YOUR_NAME") ?? "Your Name";
 const YOUR_ROLE = Deno.env.get("YOUR_ROLE") ?? "Software Engineer";
 const YOUR_EMAIL = Deno.env.get("YOUR_EMAIL") ?? "your@email.com";
-const YOUR_PHONE = Deno.env.get("YOUR_PHONE") ?? "";
-const YOUR_LINKEDIN = Deno.env.get("YOUR_LINKEDIN") ?? "";
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
@@ -29,7 +27,7 @@ Looking forward to hearing from you!
 
 Best regards,
 ${YOUR_NAME}
-${YOUR_EMAIL}${YOUR_PHONE ? `\n${YOUR_PHONE}` : ""}${YOUR_LINKEDIN ? `\n${YOUR_LINKEDIN}` : ""}`;
+${YOUR_EMAIL}`;
 
   return (
     `📧 *Email Draft*\n\n` +
