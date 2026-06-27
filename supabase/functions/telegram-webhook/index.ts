@@ -139,70 +139,59 @@ async function createGmailDraft(
 
 // ── OpenRouter Vision — extract email from image ──────────────────────────────
 
-async function extractEmailFromImage(
-  base64Data: string,
-  mimeType: string,
-): Promise<string | null> {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "meta-llama/llama-3.2-11b-vision-instruct:free",
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: "Extract the email address from this image. Return ONLY the email address, no other text. If no email address is present, return exactly: NO_EMAIL",
-            },
-            {
-              type: "image_url",
-              image_url: { url: `data:${mimeType};base64,${base64Data}` },
-            },
-          ],
-        },
-      ],
-      temperature: 0,
-    }),
-  });
+async function extractEmailFromImage(imageUrl: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
 
-  const data = await res.json();
-  const raw: string =
-    data.choices?.[0]?.message?.content?.trim() ?? "";
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "qwen/qwen3.6-35b-a3b",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Extract the email address from this image. Return ONLY the email address, no other text. If no email address is present, return exactly: NO_EMAIL",
+              },
+              {
+                type: "image_url",
+                image_url: { url: imageUrl },
+              },
+            ],
+          },
+        ],
+        temperature: 0,
+      }),
+    });
 
-  if (!raw || raw === "NO_EMAIL") return null;
+    const data = await res.json();
+    const raw: string = data.choices?.[0]?.message?.content?.trim() ?? "";
 
-  const match = raw.match(EMAIL_REGEX);
-  return match?.[0] ?? null;
+    if (!raw || raw === "NO_EMAIL") return null;
+
+    const match = raw.match(EMAIL_REGEX);
+    return match?.[0] ?? null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // ── Telegram helpers ───────────────────────────────────────────────────────────
 
-async function getImageBase64(
-  fileId: string,
-): Promise<{ base64: string; mimeType: string } | null> {
+async function getTelegramFileUrl(fileId: string): Promise<string | null> {
   const fileRes = await fetch(`${TELEGRAM_API}/getFile?file_id=${fileId}`);
   const fileData = await fileRes.json();
   const filePath: string | undefined = fileData.result?.file_path;
   if (!filePath) return null;
-
-  const imageRes = await fetch(
-    `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${filePath}`,
-  );
-  const buffer = await imageRes.arrayBuffer();
-  const base64 = btoa(
-    String.fromCharCode(...new Uint8Array(buffer)),
-  );
-
-  const mimeType = filePath.toLowerCase().endsWith(".png")
-    ? "image/png"
-    : "image/jpeg";
-
-  return { base64, mimeType };
+  return `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${filePath}`;
 }
 
 async function sendMessage(chatId: number, text: string): Promise<void> {
@@ -233,15 +222,19 @@ Deno.serve(async (req: Request) => {
     let email: string | null = null;
 
     if (message.photo) {
-      // Photo — use Gemini Vision
       await sendMessage(chatId, "🔍 Scanning screenshot for email address...");
 
       const photos = message.photo as Array<{ file_id: string }>;
-      const largest = photos[photos.length - 1]; // highest resolution
-      const image = await getImageBase64(largest.file_id);
+      const largest = photos[photos.length - 1];
+      const imageUrl = await getTelegramFileUrl(largest.file_id);
 
-      if (image) {
-        email = await extractEmailFromImage(image.base64, image.mimeType);
+      if (imageUrl) {
+        try {
+          email = await extractEmailFromImage(imageUrl);
+        } catch {
+          await sendMessage(chatId, "⚠️ Vision model timed out. Please paste the email as text instead.");
+          return new Response("ok", { status: 200 });
+        }
       }
     } else if (message.text) {
       // Plain text — regex only, no LLM needed
