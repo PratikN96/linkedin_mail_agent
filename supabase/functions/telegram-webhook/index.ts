@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const TELEGRAM_TOKEN = Deno.env.get("TELEGRAM_TOKEN")!;
-const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
+const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 const YOUR_NAME = Deno.env.get("YOUR_NAME") ?? "Your Name";
@@ -39,37 +39,42 @@ ${YOUR_EMAIL}${YOUR_PHONE ? `\n${YOUR_PHONE}` : ""}${YOUR_LINKEDIN ? `\n${YOUR_L
   );
 }
 
-// ── Gemini Vision — extract email from image ───────────────────────────────────
+// ── OpenRouter Vision — extract email from image ──────────────────────────────
 
 async function extractEmailFromImage(
   base64Data: string,
   mimeType: string,
 ): Promise<string | null> {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text:
-                  "Extract the email address from this image. Return ONLY the email address, no other text. If no email address is present, return exactly: NO_EMAIL",
-              },
-              { inline_data: { mime_type: mimeType, data: base64Data } },
-            ],
-          },
-        ],
-        generationConfig: { temperature: 0 },
-      }),
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
     },
-  );
+    body: JSON.stringify({
+      model: "meta-llama/llama-3.2-11b-vision-instruct:free",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Extract the email address from this image. Return ONLY the email address, no other text. If no email address is present, return exactly: NO_EMAIL",
+            },
+            {
+              type: "image_url",
+              image_url: { url: `data:${mimeType};base64,${base64Data}` },
+            },
+          ],
+        },
+      ],
+      temperature: 0,
+    }),
+  });
 
   const data = await res.json();
   const raw: string =
-    data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+    data.choices?.[0]?.message?.content?.trim() ?? "";
 
   if (!raw || raw === "NO_EMAIL") return null;
 
