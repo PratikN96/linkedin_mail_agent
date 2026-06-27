@@ -4,35 +4,36 @@ const TELEGRAM_TOKEN = Deno.env.get("TELEGRAM_TOKEN")!;
 const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY")!;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
-const YOUR_NAME = Deno.env.get("YOUR_NAME") ?? "Your Name";
-const YOUR_ROLE = Deno.env.get("YOUR_ROLE") ?? "Software Engineer";
+const YOUR_NAME = Deno.env.get("YOUR_NAME") ?? "Pratik Nandeshwar";
 const YOUR_EMAIL = Deno.env.get("YOUR_EMAIL") ?? "your@email.com";
+const RESUME_FILENAME = "pratik_IIT_IIM_productManager_4yoe.pdf";
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
 // ── Email draft ────────────────────────────────────────────────────────────────
 
 function composeDraft(recipientEmail: string): string {
-  const subject = `Exploring Opportunities — ${YOUR_NAME}`;
+  const subject = `Product Manager — ${YOUR_NAME} (IIT | IIM, 4 YOE)`;
 
   const body = `Hi,
 
-I came across your post on LinkedIn and wanted to reach out.
+I came across your LinkedIn post and wanted to reach out directly.
 
-I am a ${YOUR_ROLE} and am actively exploring new opportunities. I'd love to connect and learn if there are any open roles on your team that might be a good fit.
+I'm a Product Manager with 4 years of experience, with a background from IIT and IIM. Across my career I've led 0-to-1 product builds, driven cross-functional roadmaps, and worked closely with engineering and design to ship user-centric products.
 
-I've attached my resume for your reference. Happy to jump on a quick call at your convenience.
+I'd love to explore if there's a PM opportunity on your team that could be a good fit. I've attached my resume for your reference — happy to connect for a quick call at your convenience.
 
-Looking forward to hearing from you!
+Looking forward to hearing from you.
 
-Best regards,
+Best,
 ${YOUR_NAME}
 ${YOUR_EMAIL}`;
 
   return (
     `📧 *Email Draft*\n\n` +
     `*To:* \`${recipientEmail}\`\n` +
-    `*Subject:* ${subject}\n\n` +
+    `*Subject:* ${subject}\n` +
+    `*Attachment:* ${RESUME_FILENAME}\n\n` +
     `*Body:*\n\`\`\`\n${body}\n\`\`\``
   );
 }
