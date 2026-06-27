@@ -7,13 +7,18 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 const YOUR_NAME = Deno.env.get("YOUR_NAME") ?? "Pratik Nandeshwar";
 const YOUR_EMAIL = Deno.env.get("YOUR_EMAIL") ?? "your@email.com";
 const RESUME_FILENAME = "pratik_IIT_IIM_productManager_4yoe.pdf";
+const RESUME_URL = `https://krlchtcdnsvjvupbefza.supabase.co/storage/v1/object/public/resumes/${RESUME_FILENAME}`;
+
+const GMAIL_CLIENT_ID = Deno.env.get("GMAIL_CLIENT_ID")!;
+const GMAIL_CLIENT_SECRET = Deno.env.get("GMAIL_CLIENT_SECRET")!;
+const GMAIL_REFRESH_TOKEN = Deno.env.get("GMAIL_REFRESH_TOKEN")!;
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
 // ── Email draft ────────────────────────────────────────────────────────────────
 
-function composeDraft(recipientEmail: string): string {
-  const subject = `Product Manager — ${YOUR_NAME} (IIT | IIM, 4 YOE)`;
+function composeDraft(recipientEmail: string): { subject: string; body: string; telegramPreview: string } {
+  const subject = `Product Manager Job Application | ${YOUR_NAME} (IIT | IIM, 4 YOE)`;
 
   const body = `Hi,
 
@@ -21,21 +26,115 @@ I came across your LinkedIn post and wanted to reach out directly.
 
 I'm a Product Manager with 4 years of experience, with a background from IIT and IIM. Across my career I've led 0-to-1 product builds, driven cross-functional roadmaps, and worked closely with engineering and design to ship user-centric products.
 
-I'd love to explore if there's a PM opportunity on your team that could be a good fit. I've attached my resume for your reference — happy to connect for a quick call at your convenience.
+I'd love to explore if there's a PM opportunity on your team that could be a good fit. I've attached my resume for your reference - happy to connect for a quick call at your convenience.
 
 Looking forward to hearing from you.
 
-Best,
-${YOUR_NAME}
-${YOUR_EMAIL}`;
 
-  return (
-    `📧 *Email Draft*\n\n` +
+Regards,
+${YOUR_NAME}
+${YOUR_EMAIL}
+https://github.com/PratikN96`;
+
+  const telegramPreview =
+    `✅ *Draft created in Gmail!*\n\n` +
     `*To:* \`${recipientEmail}\`\n` +
     `*Subject:* ${subject}\n` +
     `*Attachment:* ${RESUME_FILENAME}\n\n` +
-    `*Body:*\n\`\`\`\n${body}\n\`\`\``
-  );
+    `*Body:*\n\`\`\`\n${body}\n\`\`\``;
+
+  return { subject, body, telegramPreview };
+}
+
+// ── Gmail — get access token + create draft ────────────────────────────────────
+
+async function getGmailAccessToken(): Promise<string> {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: GMAIL_CLIENT_ID,
+      client_secret: GMAIL_CLIENT_SECRET,
+      refresh_token: GMAIL_REFRESH_TOKEN,
+      grant_type: "refresh_token",
+    }),
+  });
+  const data = await res.json();
+  return data.access_token;
+}
+
+function toBase64Url(str: string): string {
+  return btoa(unescape(encodeURIComponent(str)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function buildRawEmailWithAttachment(
+  to: string,
+  subject: string,
+  body: string,
+  pdfBase64: string,
+): string {
+  const boundary = "----=_Part_boundary_linkedin_mail_agent";
+
+  const mime = [
+    `From: ${YOUR_NAME} <${YOUR_EMAIL}>`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/plain; charset="UTF-8"`,
+    `Content-Transfer-Encoding: 7bit`,
+    ``,
+    body,
+    ``,
+    `--${boundary}`,
+    `Content-Type: application/pdf; name="${RESUME_FILENAME}"`,
+    `Content-Disposition: attachment; filename="${RESUME_FILENAME}"`,
+    `Content-Transfer-Encoding: base64`,
+    ``,
+    pdfBase64,
+    ``,
+    `--${boundary}--`,
+  ].join("\r\n");
+
+  return toBase64Url(mime);
+}
+
+async function createGmailDraft(
+  to: string,
+  subject: string,
+  body: string,
+): Promise<void> {
+  const [accessToken, pdfRes] = await Promise.all([
+    getGmailAccessToken(),
+    fetch(RESUME_URL),
+  ]);
+
+  const pdfBuffer = await pdfRes.arrayBuffer();
+  const pdfBase64 = arrayBufferToBase64(pdfBuffer);
+  const raw = buildRawEmailWithAttachment(to, subject, body, pdfBase64);
+
+  await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ message: { raw } }),
+  });
 }
 
 // ── OpenRouter Vision — extract email from image ──────────────────────────────
@@ -162,8 +261,9 @@ Deno.serve(async (req: Request) => {
         "❌ No email address found. Please check and try again.",
       );
     } else {
-      const draft = composeDraft(email);
-      await sendMessage(chatId, draft);
+      const { subject, body, telegramPreview } = composeDraft(email);
+      await createGmailDraft(email, subject, body);
+      await sendMessage(chatId, telegramPreview);
     }
   } catch (err) {
     console.error("Webhook error:", err);
