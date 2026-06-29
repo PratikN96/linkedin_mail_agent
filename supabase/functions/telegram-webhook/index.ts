@@ -20,28 +20,24 @@ const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 function composeDraft(recipientEmail: string): { subject: string; body: string; telegramPreview: string } {
   const subject = `Product Manager Job Application | ${YOUR_NAME} (IIT | IIM, 4 YOE)`;
 
-  const body = `Hi,
+  const body = `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#222;">
+<p>Hi,</p>
+<p>I'm a Product Manager with 4+ years of experience, currently working at Hoora. Previously, I founded and built my own fashion e-commerce startup, leading it from 0&rarr;1. I hold an MBA from IIM Rohtak and a B.Tech from IIT Roorkee.</p>
+<p>I've attached my resume for your consideration. I'd appreciate the opportunity to discuss how I can contribute to your team.</p>
+<p>Best regards,<br>
+Pratik Nandeshwar<br>
++91 9720354711<br>
+pratiknandeshwar7@gmail.com</p>
+</div>`;
 
-I came across your LinkedIn post and wanted to reach out directly.
-
-I'm a Product Manager with 4 years of experience, with a background from IIT and IIM. Across my career I've led 0-to-1 product builds, driven cross-functional roadmaps, and worked closely with engineering and design to ship user-centric products.
-
-I'd love to explore if there's a PM opportunity on your team that could be a good fit. I've attached my resume for your reference - happy to connect for a quick call at your convenience.
-
-Looking forward to hearing from you.
-
-
-Regards,
-${YOUR_NAME}
-${YOUR_EMAIL}
-https://github.com/PratikN96`;
+  const plainPreview = `Hi,\n\nI'm a Product Manager with 4+ years of experience, currently working at Hoora. Previously, I founded and built my own fashion e-commerce startup, leading it from 0→1. I hold an MBA from IIM Rohtak and a B.Tech from IIT Roorkee.\n\nI've attached my resume for your consideration. I'd appreciate the opportunity to discuss how I can contribute to your team.\n\nBest regards,\nPratik Nandeshwar\n+91 9720354711\npratiknandeshwar7@gmail.com`;
 
   const telegramPreview =
     `✅ *Draft created in Gmail!*\n\n` +
     `*To:* \`${recipientEmail}\`\n` +
     `*Subject:* ${subject}\n` +
     `*Attachment:* ${RESUME_FILENAME}\n\n` +
-    `*Body:*\n\`\`\`\n${body}\n\`\`\``;
+    `*Body:*\n\`\`\`\n${plainPreview}\n\`\`\``;
 
   return { subject, body, telegramPreview };
 }
@@ -82,7 +78,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 function buildRawEmailWithAttachment(
   to: string,
   subject: string,
-  body: string,
+  bodyHtml: string,
   pdfBase64: string,
 ): string {
   const boundary = "----=_Part_boundary_linkedin_mail_agent";
@@ -95,10 +91,10 @@ function buildRawEmailWithAttachment(
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     ``,
     `--${boundary}`,
-    `Content-Type: text/plain; charset="UTF-8"`,
-    `Content-Transfer-Encoding: 7bit`,
+    `Content-Type: text/html; charset="UTF-8"`,
+    `Content-Transfer-Encoding: quoted-printable`,
     ``,
-    body,
+    bodyHtml,
     ``,
     `--${boundary}`,
     `Content-Type: application/pdf; name="${RESUME_FILENAME}"`,
@@ -113,17 +109,53 @@ function buildRawEmailWithAttachment(
   return toBase64Url(mime);
 }
 
+async function getLastSentDate(accessToken: string, toEmail: string): Promise<Date | null> {
+  const query = encodeURIComponent(`to:${toEmail} in:sent`);
+  const res = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=1`,
+    { headers: { "Authorization": `Bearer ${accessToken}` } },
+  );
+  const data = await res.json();
+  const messageId: string | undefined = data.messages?.[0]?.id;
+  if (!messageId) return null;
+
+  const msgRes = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=metadata&metadataHeaders=Date`,
+    { headers: { "Authorization": `Bearer ${accessToken}` } },
+  );
+  const msg = await msgRes.json();
+  const dateHeader: string | undefined = msg.payload?.headers?.find(
+    (h: { name: string; value: string }) => h.name === "Date",
+  )?.value;
+  return dateHeader ? new Date(dateHeader) : null;
+}
+
+// Returns skipped=true if emailed within 15 days (duplicate guard), else creates draft.
+// daysSince is included in both cases so the caller can show context.
 async function createGmailDraft(
   to: string,
   subject: string,
   body: string,
-): Promise<void> {
+): Promise<{ skipped: boolean; daysSince: number | null }> {
   const [accessToken, pdfRes] = await Promise.all([
     getGmailAccessToken(),
     fetch(RESUME_URL),
   ]);
 
-  const pdfBuffer = await pdfRes.arrayBuffer();
+  const [pdfBuffer, lastSentDate] = await Promise.all([
+    pdfRes.arrayBuffer(),
+    getLastSentDate(accessToken, to),
+  ]);
+
+  const daysSince = lastSentDate
+    ? Math.floor((Date.now() - lastSentDate.getTime()) / 86_400_000)
+    : null;
+
+  // Skip if emailed within the last 15 days (likely accidental duplicate)
+  if (daysSince !== null && daysSince < 15) {
+    return { skipped: true, daysSince };
+  }
+
   const pdfBase64 = arrayBufferToBase64(pdfBuffer);
   const raw = buildRawEmailWithAttachment(to, subject, body, pdfBase64);
 
@@ -135,6 +167,8 @@ async function createGmailDraft(
     },
     body: JSON.stringify({ message: { raw } }),
   });
+
+  return { skipped: false, daysSince };
 }
 
 // ── OpenRouter Vision — extract email from image ──────────────────────────────
@@ -255,8 +289,19 @@ Deno.serve(async (req: Request) => {
       );
     } else {
       const { subject, body, telegramPreview } = composeDraft(email);
-      await createGmailDraft(email, subject, body);
-      await sendMessage(chatId, telegramPreview);
+      const { skipped, daysSince } = await createGmailDraft(email, subject, body);
+
+      if (skipped) {
+        await sendMessage(
+          chatId,
+          `⏭️ Skipped — already emailed \`${email}\` *${daysSince} day${daysSince === 1 ? "" : "s"} ago*. Draft not created.`,
+        );
+      } else {
+        const historyNote = daysSince !== null
+          ? `\n\n⚠️ _Note: Previously contacted ${daysSince} days ago._`
+          : "";
+        await sendMessage(chatId, telegramPreview + historyNote);
+      }
     }
   } catch (err) {
     console.error("Webhook error:", err);
