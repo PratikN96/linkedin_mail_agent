@@ -24,13 +24,17 @@ function composeDraft(recipientEmail: string): { subject: string; body: string; 
 <p>Hi,</p>
 <p>I'm a Product Manager with 4+ years of experience, currently working at Hoora. Previously, I founded and built my own fashion e-commerce startup, leading it from 0&rarr;1. I hold an MBA from IIM Rohtak and a B.Tech from IIT Roorkee.</p>
 <p>I've attached my resume for your consideration. I'd appreciate the opportunity to discuss how I can contribute to your team.</p>
+<p>
+Writings: <a href="https://pratikn96.github.io/personal_website/blog/">pratikn96.github.io/personal_website/blog</a><br>
+GitHub: <a href="https://github.com/PratikN96">github.com/PratikN96</a>
+</p>
 <p>Best regards,<br>
 Pratik Nandeshwar<br>
 +91 9720354711<br>
 pratiknandeshwar7@gmail.com</p>
 </div>`;
 
-  const plainPreview = `Hi,\n\nI'm a Product Manager with 4+ years of experience, currently working at Hoora. Previously, I founded and built my own fashion e-commerce startup, leading it from 0→1. I hold an MBA from IIM Rohtak and a B.Tech from IIT Roorkee.\n\nI've attached my resume for your consideration. I'd appreciate the opportunity to discuss how I can contribute to your team.\n\nBest regards,\nPratik Nandeshwar\n+91 9720354711\npratiknandeshwar7@gmail.com`;
+  const plainPreview = `Hi,\n\nI'm a Product Manager with 4+ years of experience, currently working at Hoora. Previously, I founded and built my own fashion e-commerce startup, leading it from 0→1. I hold an MBA from IIM Rohtak and a B.Tech from IIT Roorkee.\n\nI've attached my resume for your consideration. I'd appreciate the opportunity to discuss how I can contribute to your team.\n\nWritings: https://pratikn96.github.io/personal_website/blog/\nGitHub: https://github.com/PratikN96\n\nBest regards,\nPratik Nandeshwar\n+91 9720354711\npratiknandeshwar7@gmail.com`;
 
   const telegramPreview =
     `✅ *Draft created in Gmail!*\n\n` +
@@ -92,9 +96,9 @@ function buildRawEmailWithAttachment(
     ``,
     `--${boundary}`,
     `Content-Type: text/html; charset="UTF-8"`,
-    `Content-Transfer-Encoding: quoted-printable`,
+    `Content-Transfer-Encoding: base64`,
     ``,
-    bodyHtml,
+    arrayBufferToBase64(new TextEncoder().encode(bodyHtml).buffer),
     ``,
     `--${boundary}`,
     `Content-Type: application/pdf; name="${RESUME_FILENAME}"`,
@@ -110,7 +114,7 @@ function buildRawEmailWithAttachment(
 }
 
 async function getLastSentDate(accessToken: string, toEmail: string): Promise<Date | null> {
-  const query = encodeURIComponent(`to:${toEmail} in:sent`);
+  const query = encodeURIComponent(`to:${toEmail} (in:sent OR in:drafts)`);
   const res = await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=1`,
     { headers: { "Authorization": `Bearer ${accessToken}` } },
