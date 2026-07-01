@@ -37,7 +37,7 @@ pratiknandeshwar7@gmail.com</p>
   const plainPreview = `Hi,\n\nI'm a Product Manager with 4+ years of experience, currently working at Hoora. Previously, I founded and built my own fashion e-commerce startup, leading it from 0→1. I hold an MBA from IIM Rohtak and a B.Tech from IIT Roorkee.\n\nI've attached my resume for your consideration. I'd appreciate the opportunity to discuss how I can contribute to your team.\n\nWritings: https://pratikn96.github.io/personal_website/blog/\nGitHub: https://github.com/PratikN96\n\nBest regards,\nPratik Nandeshwar\n+91 9720354711\npratiknandeshwar7@gmail.com`;
 
   const telegramPreview =
-    `✅ *Draft created in Gmail!*\n\n` +
+    `✅ *Email sent!*\n\n` +
     `*To:* \`${recipientEmail}\`\n` +
     `*Subject:* ${subject}\n` +
     `*Attachment:* ${RESUME_FILENAME}\n\n` +
@@ -113,64 +113,72 @@ function buildRawEmailWithAttachment(
   return toBase64Url(mime);
 }
 
-async function getLastSentDate(accessToken: string, toEmail: string): Promise<Date | null> {
-  const query = encodeURIComponent(`to:${toEmail} (in:sent OR in:drafts)`);
-  const res = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${query}&maxResults=1`,
-    { headers: { "Authorization": `Bearer ${accessToken}` } },
-  );
-  const data = await res.json();
-  const messageId: string | undefined = data.messages?.[0]?.id;
-  if (!messageId) return null;
+// ── Supabase DB — duplicate guard ─────────────────────────────────────────────
 
-  const msgRes = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=metadata&metadataHeaders=Date`,
-    { headers: { "Authorization": `Bearer ${accessToken}` } },
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+async function getDaysSinceLastDraft(email: string): Promise<number | null> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/contacted_emails?email=eq.${encodeURIComponent(email)}&select=drafted_at`,
+    {
+      headers: {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+    },
   );
-  const msg = await msgRes.json();
-  const dateHeader: string | undefined = msg.payload?.headers?.find(
-    (h: { name: string; value: string }) => h.name === "Date",
-  )?.value;
-  return dateHeader ? new Date(dateHeader) : null;
+  const rows = await res.json();
+  if (!rows?.length) return null;
+  const drafted = new Date(rows[0].drafted_at);
+  return Math.floor((Date.now() - drafted.getTime()) / 86_400_000);
 }
 
-// Returns skipped=true if emailed within 15 days (duplicate guard), else creates draft.
-// daysSince is included in both cases so the caller can show context.
+async function recordDraft(email: string): Promise<void> {
+  await fetch(`${SUPABASE_URL}/rest/v1/contacted_emails`, {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_SERVICE_ROLE_KEY,
+      "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": "resolution=merge-duplicates",
+    },
+    body: JSON.stringify({ email, drafted_at: new Date().toISOString() }),
+  });
+}
+
+// Returns skipped=true if drafted within 15 days (duplicate guard), else creates draft.
 async function createGmailDraft(
   to: string,
   subject: string,
   body: string,
 ): Promise<{ skipped: boolean; daysSince: number | null }> {
+  const daysSince = await getDaysSinceLastDraft(to);
+
+  // Skip if drafted within the last 15 days
+  if (daysSince !== null && daysSince < 15) {
+    return { skipped: true, daysSince };
+  }
+
   const [accessToken, pdfRes] = await Promise.all([
     getGmailAccessToken(),
     fetch(RESUME_URL),
   ]);
 
-  const [pdfBuffer, lastSentDate] = await Promise.all([
-    pdfRes.arrayBuffer(),
-    getLastSentDate(accessToken, to),
-  ]);
-
-  const daysSince = lastSentDate
-    ? Math.floor((Date.now() - lastSentDate.getTime()) / 86_400_000)
-    : null;
-
-  // Skip if emailed within the last 15 days (likely accidental duplicate)
-  if (daysSince !== null && daysSince < 15) {
-    return { skipped: true, daysSince };
-  }
-
+  const pdfBuffer = await pdfRes.arrayBuffer();
   const pdfBase64 = arrayBufferToBase64(pdfBuffer);
   const raw = buildRawEmailWithAttachment(to, subject, body, pdfBase64);
 
-  await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
+  await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ message: { raw } }),
+    body: JSON.stringify({ raw }),
   });
+
+  await recordDraft(to);
 
   return { skipped: false, daysSince };
 }
