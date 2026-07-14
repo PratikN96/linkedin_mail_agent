@@ -49,6 +49,8 @@ Set these in the Supabase dashboard (not in `.env` — the Edge Function reads f
 | `GMAIL_CLIENT_ID` | Google Cloud Console |
 | `GMAIL_CLIENT_SECRET` | Google Cloud Console |
 | `GMAIL_REFRESH_TOKEN` | Run `python get_gmail_token.py` |
+| `SUPABASE_URL` | Auto-injected by Supabase Edge Functions runtime |
+| `SUPABASE_SERVICE_ROLE_KEY` | Auto-injected by Supabase Edge Functions runtime |
 
 ## Gmail OAuth Setup
 
@@ -59,7 +61,8 @@ The `get_gmail_token.py` script is a one-time utility to obtain a `GMAIL_REFRESH
 - **Resume**: Hardcoded as `pratik_IIT_IIM_productManager_4yoe.pdf`, fetched from Supabase Storage public URL at `RESUME_URL`. To change the resume, update both `RESUME_FILENAME` and `RESUME_URL` constants in `index.ts`.
 - **Email template**: Fixed PM template in `composeDraft()` — subject line uses `YOUR_NAME`; the body and signature are fully hardcoded strings (phone/email in the body are literal, not from env vars).
 - **Vision model**: OpenRouter `qwen/qwen3.6-35b-a3b` with `temperature: 0`, 30s AbortController timeout. Falls back to asking user to paste text if it times out.
-- **Gmail draft**: Built as RFC 2822 multipart/mixed MIME, base64url-encoded, POSTed to Gmail REST API. Access token is refreshed on every request via OAuth2 refresh token flow. `createGmailDraft` does not check the API response — errors are silently swallowed.
+- **Email sending**: Despite the function being named `createGmailDraft`, it actually **sends** the email directly via `gmail/v1/users/me/messages/send`. Built as RFC 2822 multipart/mixed MIME, base64url-encoded. Access token is refreshed on every request via OAuth2 refresh token flow. API response is not checked — errors are silently swallowed.
+- **Duplicate guard**: Before sending, checks the `contacted_emails` Supabase table. Skips if the same address was emailed within the last 15 days; records every send via `recordDraft()`. Uses `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` env vars (auto-injected by Supabase Edge Functions runtime).
 - **Supabase project ID**: `krlchtcdnsvjvupbefza`
 
 ## Phase 2 (Not Yet Implemented)
